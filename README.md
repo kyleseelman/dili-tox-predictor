@@ -37,16 +37,34 @@ All data is from peer-reviewed, publicly available sources — no synthetic or m
 
 ## Models
 
-Six architectures trained and compared:
+Eight model configurations trained and compared, including transfer learning experiments:
 
 | Model | Architecture | AUC-ROC | AUC-PR | Sensitivity | Specificity | MCC |
 |-------|-------------|---------|--------|-------------|-------------|-----|
-| GNN | Graph Convolutional Network on molecular graphs | **0.708** | **0.781** | 0.535 | 0.731 | 0.256 |
-| HepaTox-Fusion | Multi-task GIN + highway FP + cross-attention *(novel)* | 0.674 | 0.748 | 0.563 | 0.680 | 0.233 |
-| NeuralNet | Multi-modal feed-forward (FP + descriptors + assays) | 0.689 | 0.760 | 0.754 | 0.577 | **0.329** |
+| NeuralNet | Multi-modal feed-forward (FP + descriptors + assays) | **0.693** | 0.764 | 0.599 | 0.744 | **0.328** |
 | Random Forest | 500 trees on Morgan FP + descriptors + assays | 0.675 | 0.767 | 0.838 | 0.359 | 0.223 |
+| GNN | Graph Convolutional Network on molecular graphs | 0.671 | **0.800** | 0.599 | 0.603 | 0.193 |
+| HepaTox-Fusion | Multi-task GIN + highway FP + cross-attention *(novel)* | 0.662 | 0.747 | 0.683 | 0.564 | 0.241 |
+| GNN-PreTrained | GCN pre-trained on 8K proxy-DILI → fine-tuned | 0.658 | 0.771 | 0.599 | 0.628 | 0.217 |
+| Fusion-PreTrained | HepaTox-Fusion pre-trained → fine-tuned | 0.629 | 0.746 | 0.669 | 0.462 | 0.129 |
 | XGBoost | Gradient-boosted trees | 0.618 | 0.748 | 0.718 | 0.449 | 0.169 |
 | SVM | RBF kernel with balanced classes | 0.611 | 0.733 | 0.951 | 0.154 | 0.178 |
+
+## Transfer Learning Experiment
+
+A key experiment in this project tested whether **pre-training on ~8,500 proxy-DILI compounds** (from mitochondrial toxicity, BSEP inhibition, and rat hepatotoxicity assays) could improve the complex models when fine-tuned on the 1,111-compound DILIst gold standard.
+
+**Approach:**
+1. **Multi-task pre-training**: GNN and HepaTox-Fusion trained on the full proxy-DILI dataset with separate task heads for each assay source (val AUC: 0.76 GNN, 0.74 Fusion)
+2. **Staged fine-tuning**: Head warmup with frozen backbone → full fine-tuning with discriminative learning rates and early stopping
+
+**Result: Negative transfer.** Pre-trained models performed slightly *worse* than their from-scratch counterparts (GNN: 0.658 vs 0.671; Fusion: 0.629 vs 0.662). This is a well-known challenge in drug toxicity prediction:
+
+- **Task misalignment**: Proxy endpoints (rat hepatotoxicity, BSEP) capture different mechanisms than human DILI, introducing bias into the learned representations
+- **Distribution shift**: The chemical space of proxy-tested compounds differs from FDA-approved drugs in DILIst
+- **Label noise**: Proxy labels aggregate heterogeneous assays with variable reliability
+
+This negative result is scientifically informative — it demonstrates that more data alone doesn't improve DILI prediction; the data must be mechanistically aligned with the target endpoint. Future work could explore self-supervised pre-training on molecular structure (contrastive learning on unlabeled compounds) rather than supervised pre-training on weakly related endpoints.
 
 ## HepaTox-Fusion Architecture
 
@@ -101,6 +119,7 @@ dili-tox-predictor/
 │   ├── data_loading.py             # Data merging and preprocessing
 │   ├── featurization.py            # Molecular featurization
 │   ├── evaluation.py               # Metrics and model comparison
+│   ├── pretrain.py                 # Pre-train → fine-tune pipeline
 │   ├── interpret.py                # Feature importance analysis
 │   ├── visualize.py                # Publication-quality plots
 │   └── models/
@@ -118,7 +137,7 @@ cd dili-tox-predictor
 python train.py
 ```
 
-Datasets are automatically downloaded on first run. The full pipeline trains 6 models and generates all visualizations.
+Datasets are automatically downloaded on first run. The full pipeline trains 8 model configurations (including transfer learning experiments) and generates all visualizations.
 
 ## References
 

@@ -39,6 +39,11 @@ from src.models.hybrid import train_hybrid
 from src.evaluation import compare_models, compute_metrics, print_metrics
 from src.interpret import compute_shap_values, print_top_features, mechanistic_analysis
 from src.visualize import generate_all_visualizations
+from src.pretrain import (
+    load_proxy_pretrain_data,
+    pretrain_gnn, finetune_gnn,
+    pretrain_hybrid, finetune_hybrid,
+)
 
 
 def main():
@@ -144,15 +149,45 @@ def main():
     )
     all_results["HepaTox-Fusion"] = hybrid_result
 
-    # --- 8. Compare All Models ---
+    # --- 8. Pre-train on 8K proxy-DILI → Fine-tune on DILIst ---
     print("\n" + "="*70)
-    print("  STEP 8: Model Comparison")
+    print("  STEP 8: Pre-train on 8,558 Proxy-DILI Compounds")
+    print("="*70)
+
+    proxy_df = load_proxy_pretrain_data()
+
+    print("\n  Pre-training GNN (multi-task) on proxy-DILI...")
+    pt_gnn = pretrain_gnn(proxy_df, epochs=50, batch_size=64)
+
+    print("\n  Fine-tuning GNN on DILIst (staged: warmup → full)...")
+    ft_gnn_result = finetune_gnn(
+        pt_gnn, split["smiles_train"], split["y_train"],
+        split["smiles_test"], split["y_test"],
+        epochs_warmup=20, epochs_full=50,
+    )
+    all_results["GNN-PreTrained"] = ft_gnn_result
+
+    print("\n  Pre-training HepaTox-Fusion (multi-task) on proxy-DILI...")
+    pt_hybrid = pretrain_hybrid(proxy_df, epochs=50, batch_size=64)
+
+    print("\n  Fine-tuning HepaTox-Fusion on DILIst (staged)...")
+    ft_hybrid_result = finetune_hybrid(
+        pt_hybrid, split["smiles_train"], split["y_train"],
+        split["smiles_test"], split["y_test"],
+        proxy_train=proxy_train, proxy_test=proxy_test,
+        epochs_warmup=20, epochs_full=60,
+    )
+    all_results["Fusion-PreTrained"] = ft_hybrid_result
+
+    # --- 9. Compare All Models ---
+    print("\n" + "="*70)
+    print("  STEP 9: Model Comparison")
     print("="*70)
     summary = compare_models(all_results, split["y_test"])
 
-    # --- 9. Interpretability ---
+    # --- 10. Interpretability ---
     print("\n" + "="*70)
-    print("  STEP 9: Mechanistic Interpretability Analysis")
+    print("  STEP 10: Mechanistic Interpretability Analysis")
     print("="*70)
 
     best_classical = max(
@@ -171,9 +206,9 @@ def main():
     print_top_features(shap_result, top_n=25)
     mech = mechanistic_analysis(shap_result, top_n=40)
 
-    # --- 10. Visualizations ---
+    # --- 11. Visualizations ---
     print("\n" + "="*70)
-    print("  STEP 10: Generating Axiom-Style Visualizations")
+    print("  STEP 11: Generating Visualizations")
     print("="*70)
 
     best_model_name = max(summary, key=lambda k: summary[k]["AUC-ROC"])
@@ -192,7 +227,7 @@ def main():
         output_dir=output_dir,
     )
 
-    # --- 11. Save Results ---
+    # --- 12. Save Results ---
     elapsed = time.time() - start
     output = {
         "dataset": {
